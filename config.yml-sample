@@ -43,6 +43,30 @@ STRIKE_WORDS:
 - splice
 - export
 
+# Phrase replacements to shorten common terms (case-insensitive matching)
+# Format: "original_phrase": "replacement"
+PHRASE_REPLACEMENTS:
+  "one_shot": "1shot"
+  "one shot": "1shot"
+  "two_shot": "2shot"
+  "two shot": "2shot"
+  "drum_loop": "drmlp"
+  "drum loop": "drmlp"
+  "bass_line": "bass"
+  "bass line": "bass"
+  "lead_synth": "lead"
+  "lead synth": "lead"
+  "background": "bg"
+  "atmosphere": "atmo"
+  "atmospheric": "atmo"
+  "percussion": "perc"
+  "synthesizer": "synth"
+  "electronic": "elec"
+  "distorted": "dist"
+  "reverb": "rev"
+  "delay": "dly"
+  "filtered": "filt"
+
 # "Split punctuation" is used to separate words.
 SPLIT_PUNCTUATION:
 - "_"

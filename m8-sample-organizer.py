@@ -26,6 +26,12 @@ MAX_FILE_LENGTH = config["MAX_FILE_LENGTH"]
 MAX_DIR_LENGTH = config["MAX_DIR_LENGTH"]
 MAX_OUTPUT_LENGTH = config["MAX_OUTPUT_LENGTH"]
 
+# Load phrase replacements (case-insensitive)
+PHRASE_REPLACEMENTS = {}
+if "PHRASE_REPLACEMENTS" in config:
+    for original, replacement in config["PHRASE_REPLACEMENTS"].items():
+        PHRASE_REPLACEMENTS[original.lower()] = replacement
+
 # Global set to track used output paths for collision detection
 used_output_paths = set()
 
@@ -71,6 +77,9 @@ def shorten_path(path):
     for c in FILL_PUNCTUATION:
         root = root.replace(c, "")
 
+    # Apply phrase replacements before other processing
+    root = apply_phrase_replacements(root)
+
     path = root + ext
 
     # Split the path into a list of parts (i.e., folders)
@@ -91,6 +100,38 @@ def shorten_path(path):
     parts = [pack, path, file]
     path = os.sep.join([part for part in parts if part])
     return path
+
+def apply_phrase_replacements(text):
+    """Apply phrase replacements to shorten common terms."""
+    if not PHRASE_REPLACEMENTS:
+        return text
+    
+    # Sort replacements by length (longest first) to avoid partial replacements
+    sorted_replacements = sorted(PHRASE_REPLACEMENTS.items(), key=lambda x: len(x[0]), reverse=True)
+    
+    text_lower = text.lower()
+    result = text
+    
+    for original, replacement in sorted_replacements:
+        # Case-insensitive replacement while preserving original case pattern
+        if original in text_lower:
+            # Find all occurrences and replace them
+            start = 0
+            while True:
+                pos = text_lower.find(original, start)
+                if pos == -1:
+                    break
+                
+                # Replace in the result string
+                before = result[:pos]
+                after = result[pos + len(original):]
+                result = before + replacement + after
+                
+                # Update text_lower to reflect the change
+                text_lower = result.lower()
+                start = pos + len(replacement)
+    
+    return result
 
 def clean_folder(folder, unique_words):
     words = folder.split()
