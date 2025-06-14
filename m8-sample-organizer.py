@@ -206,6 +206,21 @@ def format_word(word):
         word = word.title()
     return word
 
+def extract_numeric_suffix(stem):
+    """Extract existing numeric suffix from filename stem. Returns (base_stem, suffix_num) or (stem, None)."""
+    import re
+    # Look for patterns like _01, _02, _1, _2 at the end of the filename
+    match = re.search(r'_(\d+)$', stem)
+    if match:
+        suffix_num = int(match.group(1))
+        base_stem = stem[:match.start()]
+        return base_stem, suffix_num
+    return stem, None
+
+def format_suffix(num):
+    """Format numeric suffix with zero padding for single digits."""
+    return f"_{num:02d}"
+
 def generate_unique_path(original_path, used_paths):
     """Generate a unique path by appending numeric suffixes to avoid collisions."""
     # Check if this exact path is already used
@@ -216,15 +231,19 @@ def generate_unique_path(original_path, used_paths):
         stem = path_obj.stem
         ext = path_obj.suffix
         
+        # Extract any existing numeric suffix
+        base_stem, existing_suffix = extract_numeric_suffix(stem)
+        
         # Check if there's any path that would conflict with this base name
         base_collision = False
         for used_path in used_paths:
             used_path_obj = pathlib.Path(used_path)
             if (used_path_obj.parent == path_obj.parent and 
-                used_path_obj.stem.split('_')[0] == stem.split('_')[0] and
                 used_path_obj.suffix == ext):
-                base_collision = True
-                break
+                used_base_stem, _ = extract_numeric_suffix(used_path_obj.stem)
+                if used_base_stem == base_stem:
+                    base_collision = True
+                    break
         
         if not base_collision:
             used_paths.add(original_path)
@@ -236,29 +255,24 @@ def generate_unique_path(original_path, used_paths):
     stem = path_obj.stem
     ext = path_obj.suffix
     
-    # Find the base stem (without any existing numeric suffix)
-    base_stem = stem
-    if '_' in stem:
-        parts = stem.split('_')
-        if parts[-1].isdigit():
-            base_stem = '_'.join(parts[:-1])
+    # Extract the base stem and any existing numeric suffix
+    base_stem, existing_suffix = extract_numeric_suffix(stem)
     
     # Find all existing paths with this base stem in the same directory
     collision_group = []
+    existing_numbers = set()
+    
     for used_path in list(used_paths):
         used_path_obj = pathlib.Path(used_path)
         if (used_path_obj.parent == path_obj.parent and 
             used_path_obj.suffix == ext):
-            used_stem = used_path_obj.stem
-            used_base_stem = used_stem
-            if '_' in used_stem:
-                parts = used_stem.split('_')
-                if parts[-1].isdigit():
-                    used_base_stem = '_'.join(parts[:-1])
+            used_base_stem, used_suffix = extract_numeric_suffix(used_path_obj.stem)
             
-            # Check if stems match (ignoring trailing numeric suffixes)
+            # Check if stems match (ignoring numeric suffixes)
             if used_base_stem == base_stem:
                 collision_group.append(used_path)
+                if used_suffix is not None:
+                    existing_numbers.add(used_suffix)
     
     # If we found existing files in the collision group, we need to renumber them
     if collision_group:
@@ -266,34 +280,56 @@ def generate_unique_path(original_path, used_paths):
         for path in collision_group:
             used_paths.discard(path)
         
-        # Re-add them with proper numbering starting from _1
+        # Re-add them with proper numbering, preserving existing numeric suffixes
         for i, path in enumerate(collision_group):
             path_obj_temp = pathlib.Path(path)
-            counter = i + 1
-            suffix = f"_{counter}"
+            temp_base_stem, temp_existing_suffix = extract_numeric_suffix(path_obj_temp.stem)
+            
+            if temp_existing_suffix is not None:
+                # Keep the existing suffix
+                suffix = format_suffix(temp_existing_suffix)
+                existing_numbers.add(temp_existing_suffix)
+            else:
+                # Assign a new suffix, finding the next available number
+                counter = 1
+                while counter in existing_numbers:
+                    counter += 1
+                suffix = format_suffix(counter)
+                existing_numbers.add(counter)
             
             # Calculate space for the new filename
             max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
             
             if max_stem_length <= 0:
-                new_stem = str(counter)
+                new_stem = f"{counter:02d}"
             else:
-                truncated_base = base_stem[:max_stem_length]
+                truncated_base = temp_base_stem[:max_stem_length]
                 new_stem = truncated_base + suffix
             
             new_filename = new_stem + ext
             new_path = os.path.join(directory, new_filename) if directory else new_filename
             used_paths.add(new_path)
     
-    # Now add the current file with the next number in sequence
-    next_counter = len(collision_group) + 1
-    suffix = f"_{next_counter}"
+    # Now add the current file with the appropriate suffix
+    if existing_suffix is not None:
+        # Use the existing suffix if it's not already taken
+        if existing_suffix not in existing_numbers:
+            suffix = format_suffix(existing_suffix)
+            next_counter = existing_suffix
+        else:
+            # Find the next available number
+            next_counter = max(existing_numbers) + 1 if existing_numbers else 1
+            suffix = format_suffix(next_counter)
+    else:
+        # Find the next available number
+        next_counter = max(existing_numbers) + 1 if existing_numbers else 1
+        suffix = format_suffix(next_counter)
     
     # Calculate space for the new filename
     max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
     
     if max_stem_length <= 0:
-        new_stem = str(next_counter)
+        new_stem = f"{next_counter:02d}"
     else:
         truncated_base = base_stem[:max_stem_length]
         new_stem = truncated_base + suffix
@@ -305,11 +341,11 @@ def generate_unique_path(original_path, used_paths):
     counter = next_counter
     while new_path in used_paths and counter < 1000:
         counter += 1
-        suffix = f"_{counter}"
+        suffix = format_suffix(counter)
         max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
         
         if max_stem_length <= 0:
-            new_stem = str(counter)
+            new_stem = f"{counter:02d}"
         else:
             truncated_base = base_stem[:max_stem_length]
             new_stem = truncated_base + suffix
