@@ -70,15 +70,15 @@ def strip_path_prefix(path, prefix):
 def shorten_path(path):
     (root, ext,) = os.path.splitext(path) 
 
+    # Apply phrase replacements to the entire path early in the process
+    root = apply_phrase_replacements(root)
+
     # Clean up the punctuation
     for c in SPLIT_PUNCTUATION:
         root = root.replace(c, " ")
 
     for c in FILL_PUNCTUATION:
         root = root.replace(c, "")
-
-    # Apply phrase replacements before other processing
-    root = apply_phrase_replacements(root)
 
     path = root + ext
 
@@ -134,6 +134,9 @@ def apply_phrase_replacements(text):
     return result
 
 def clean_folder(folder, unique_words):
+    # Apply phrase replacements first, before any other processing
+    folder = apply_phrase_replacements(folder)
+    
     words = folder.split()
 
     words = remove_strike_words(words)
@@ -160,6 +163,9 @@ def clean_path(path, unique_words):
     return "/".join(path)
 
 def clean_file(file, unique_words):
+    # Apply phrase replacements to the file name first
+    file = apply_phrase_replacements(file)
+    
     p = pathlib.Path(file)
 
     words = [format_word(word) for word in p.stem.split()]
