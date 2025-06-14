@@ -26,6 +26,9 @@ MAX_FILE_LENGTH = config["MAX_FILE_LENGTH"]
 MAX_DIR_LENGTH = config["MAX_DIR_LENGTH"]
 MAX_OUTPUT_LENGTH = config["MAX_OUTPUT_LENGTH"]
 
+# Global set to track used output paths for collision detection
+used_output_paths = set()
+
 def get_files_by_type(folder, file_types=None):
     # Initialize an empty list to store the file paths
     file_paths = []
@@ -156,6 +159,57 @@ def format_word(word):
         word = word.title()
     return word
 
+def generate_unique_path(original_path, used_paths):
+    """Generate a unique path by appending numeric suffixes to avoid collisions."""
+    if original_path not in used_paths:
+        used_paths.add(original_path)
+        return original_path
+    
+    # Split the path into parts
+    path_obj = pathlib.Path(original_path)
+    directory = str(path_obj.parent) if path_obj.parent != pathlib.Path('.') else ""
+    stem = path_obj.stem
+    ext = path_obj.suffix
+    
+    # Try numeric suffixes
+    counter = 1
+    while counter < 1000:  # Safety limit to prevent infinite loops
+        suffix = f"_{counter}"
+        
+        # Calculate space available for the stem after accounting for suffix and extension
+        max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
+        
+        if max_stem_length <= 0:
+            # If no space for stem, use just the counter as the filename
+            new_stem = str(counter)
+        else:
+            # Truncate stem if necessary to fit the suffix
+            truncated_stem = stem[:max_stem_length]
+            new_stem = truncated_stem + suffix
+        
+        new_filename = new_stem + ext
+        
+        # Reconstruct full path
+        if directory:
+            new_path = os.path.join(directory, new_filename)
+        else:
+            new_path = new_filename
+        
+        # Check if this path is unique
+        if new_path not in used_paths:
+            used_paths.add(new_path)
+            return new_path
+        
+        counter += 1
+    
+    # Fallback: if we somehow can't find a unique name, use timestamp
+    import time
+    timestamp = str(int(time.time()))
+    fallback_filename = timestamp + ext
+    fallback_path = os.path.join(directory, fallback_filename) if directory else fallback_filename
+    used_paths.add(fallback_path)
+    return fallback_path
+
 def convert_wav_to_16bit(ffmpeg_path, input_path, output_path):
     # Create the directories in the output path if they do not exist
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -169,6 +223,9 @@ def convert_wav_to_16bit(ffmpeg_path, input_path, output_path):
         print("error converting!")
 
 def main():
+    global used_output_paths
+    used_output_paths = set()  # Reset the set for each run
+    
     files = get_files_by_type(SRC_FOLDER, file_types=FILE_TYPES)
 
     for src_path in files:
@@ -177,13 +234,21 @@ def main():
 
         print(f"Input {relative_path}")
         if len(short_path) < MAX_OUTPUT_LENGTH:
-            print(f"Output {short_path}")
+            # Generate unique path to prevent collisions
+            unique_short_path = generate_unique_path(short_path, used_output_paths)
+            print(f"Output {unique_short_path}")
+            if unique_short_path != short_path:
+                print(f"  (collision resolved: {short_path} -> {unique_short_path})")
         else:
             while len(short_path) >= MAX_OUTPUT_LENGTH:
                 print(f"Output {short_path} is longer than {MAX_OUTPUT_LENGTH} characters. Edit?")
                 short_path = input(">")
+            # After manual editing, still check for uniqueness
+            unique_short_path = generate_unique_path(short_path, used_output_paths)
+            if unique_short_path != short_path:
+                print(f"  (collision resolved: {short_path} -> {unique_short_path})")
 
-        dest_path = os.path.join(DEST_FOLDER, short_path)
+        dest_path = os.path.join(DEST_FOLDER, unique_short_path)
 
         if SKIP_EXISTING and os.path.exists(dest_path):
             continue
