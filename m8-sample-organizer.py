@@ -161,54 +161,117 @@ def format_word(word):
 
 def generate_unique_path(original_path, used_paths):
     """Generate a unique path by appending numeric suffixes to avoid collisions."""
+    # Check if this exact path is already used
     if original_path not in used_paths:
-        used_paths.add(original_path)
-        return original_path
+        # Check if there would be a collision after any potential truncation/processing
+        path_obj = pathlib.Path(original_path)
+        directory = str(path_obj.parent) if path_obj.parent != pathlib.Path('.') else ""
+        stem = path_obj.stem
+        ext = path_obj.suffix
+        
+        # Check if there's any path that would conflict with this base name
+        base_collision = False
+        for used_path in used_paths:
+            used_path_obj = pathlib.Path(used_path)
+            if (used_path_obj.parent == path_obj.parent and 
+                used_path_obj.stem.split('_')[0] == stem.split('_')[0] and
+                used_path_obj.suffix == ext):
+                base_collision = True
+                break
+        
+        if not base_collision:
+            used_paths.add(original_path)
+            return original_path
     
-    # Split the path into parts
+    # We have a collision, so we need to handle it properly
     path_obj = pathlib.Path(original_path)
     directory = str(path_obj.parent) if path_obj.parent != pathlib.Path('.') else ""
     stem = path_obj.stem
     ext = path_obj.suffix
     
-    # Try numeric suffixes
-    counter = 1
-    while counter < 1000:  # Safety limit to prevent infinite loops
-        suffix = f"_{counter}"
+    # Find the base stem (without any existing numeric suffix)
+    base_stem = stem
+    if '_' in stem:
+        parts = stem.split('_')
+        if parts[-1].isdigit():
+            base_stem = '_'.join(parts[:-1])
+    
+    # Find all existing paths with this base stem in the same directory
+    collision_group = []
+    for used_path in list(used_paths):
+        used_path_obj = pathlib.Path(used_path)
+        if (used_path_obj.parent == path_obj.parent and 
+            used_path_obj.suffix == ext):
+            used_stem = used_path_obj.stem
+            used_base_stem = used_stem
+            if '_' in used_stem:
+                parts = used_stem.split('_')
+                if parts[-1].isdigit():
+                    used_base_stem = '_'.join(parts[:-1])
+            
+            # Check if stems match (ignoring trailing numeric suffixes)
+            if used_base_stem == base_stem:
+                collision_group.append(used_path)
+    
+    # If we found existing files in the collision group, we need to renumber them
+    if collision_group:
+        # Remove the collision group from used_paths temporarily
+        for path in collision_group:
+            used_paths.discard(path)
         
-        # Calculate space available for the stem after accounting for suffix and extension
+        # Re-add them with proper numbering starting from _1
+        for i, path in enumerate(collision_group):
+            path_obj_temp = pathlib.Path(path)
+            counter = i + 1
+            suffix = f"_{counter}"
+            
+            # Calculate space for the new filename
+            max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
+            
+            if max_stem_length <= 0:
+                new_stem = str(counter)
+            else:
+                truncated_base = base_stem[:max_stem_length]
+                new_stem = truncated_base + suffix
+            
+            new_filename = new_stem + ext
+            new_path = os.path.join(directory, new_filename) if directory else new_filename
+            used_paths.add(new_path)
+    
+    # Now add the current file with the next number in sequence
+    next_counter = len(collision_group) + 1
+    suffix = f"_{next_counter}"
+    
+    # Calculate space for the new filename
+    max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
+    
+    if max_stem_length <= 0:
+        new_stem = str(next_counter)
+    else:
+        truncated_base = base_stem[:max_stem_length]
+        new_stem = truncated_base + suffix
+    
+    new_filename = new_stem + ext
+    new_path = os.path.join(directory, new_filename) if directory else new_filename
+    
+    # Final safety check
+    counter = next_counter
+    while new_path in used_paths and counter < 1000:
+        counter += 1
+        suffix = f"_{counter}"
         max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
         
         if max_stem_length <= 0:
-            # If no space for stem, use just the counter as the filename
             new_stem = str(counter)
         else:
-            # Truncate stem if necessary to fit the suffix
-            truncated_stem = stem[:max_stem_length]
-            new_stem = truncated_stem + suffix
+            truncated_base = base_stem[:max_stem_length]
+            new_stem = truncated_base + suffix
         
         new_filename = new_stem + ext
-        
-        # Reconstruct full path
-        if directory:
-            new_path = os.path.join(directory, new_filename)
-        else:
-            new_path = new_filename
-        
-        # Check if this path is unique
-        if new_path not in used_paths:
-            used_paths.add(new_path)
-            return new_path
-        
-        counter += 1
+        new_path = os.path.join(directory, new_filename) if directory else new_filename
     
-    # Fallback: if we somehow can't find a unique name, use timestamp
-    import time
-    timestamp = str(int(time.time()))
-    fallback_filename = timestamp + ext
-    fallback_path = os.path.join(directory, fallback_filename) if directory else fallback_filename
-    used_paths.add(fallback_path)
-    return fallback_path
+    used_paths.add(new_path)
+    return new_path
 
 def convert_wav_to_16bit(ffmpeg_path, input_path, output_path):
     # Create the directories in the output path if they do not exist
