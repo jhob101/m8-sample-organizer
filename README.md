@@ -1,4 +1,4 @@
-**[Click here to download!](https://github.com/birds-inc/m8-sample-organizer/archive/refs/heads/main.zip)**
+**[Download the **M8 Sample Organizer** here](https://github.com/jhob101/m8-sample-organizer/archive/refs/heads/main.zip)**
 
 This is a Python script to organize and convert your samples for the M8 tracker.  You'll run this tool on the command-line - instructions below.
 
@@ -34,6 +34,7 @@ It does lots of cleanup:
 * **Converts** audio files to M8-approved 16-bit WAV files
 * **Removes** duplicate words, punctuation and common filler phrases (like `processed` and `final`)
 * **Simplifies** layers of folders into one level
+* **Shortens** long words or phrases into shorter versions (like `atmospheric` to `atmos`, or `one shot` to `1shot`)
 * **Detects** new files added to your library each time you run it
 
 # Instructions
@@ -54,7 +55,7 @@ Note the installation path for later reference.
 
 ## Download the M8 Sample Organizer
 
-**[Click here](https://github.com/birds-inc/m8-sample-organizer/archive/refs/heads/main.zip)** to download the **M8 Sample Organizer** code.  Unzip the contents.
+**[Click here](https://github.com/jhob101/m8-sample-organizer/archive/refs/heads/main.zip)** to download the **M8 Sample Organizer** code.  Unzip the contents.
 
 ## Set up the config file
 
