@@ -59,25 +59,38 @@ Note the installation path for later reference.
 
 ## Set up the config file
 
-In the M8 Sample Organizer folder, there's a file called `config.yml-sample`.  Rename this file to `config.yml`.
+In the M8 Sample Organizer folder, there's a file called `config-sample.yml`.  Rename this file to `config.yml`.
 
 Then edit the `SRC_FOLDER`, `DEST_FOLDER`, and `FFMPEG_PATH` to point at your audio library and FFmpeg.  `DEST_FOLDER` is where this tool will create files, so be sure to set it someplace safe!
 
 You can also configure any additional cleanup settings to your liking, add new strike words, etc.
 
-## Install yaml
+## Set up the virtual environment and install dependencies
 
-We need a Python library for reading the configuration file - install it by running this command:
+Navigate to the `m8-sample-organizer-main` folder and create a virtual environment:
 
-`python3 -m pip install pyyaml`
+`python3 -m venv venv`
 
-(If `python3` fails, try just `python` instead.)
+Then activate it:
+
+* **Mac/Linux:** `source venv/bin/activate`
+* **Windows:** `venv\Scripts\activate`
+
+Then install the required Python libraries:
+
+`pip install -r requirements.txt`
+
+(If `python3` fails in any of the above, try just `python` instead.)
 
 ## Run the tool
 
-Finally, navigate to the `m8-sample-organizer-main` folder and run the following command:
+With the virtual environment activated, run the following command:
 
 `python3 src/m8-sample-organizer.py`
+
+You can also specify a different config file with the `-c` flag (defaults to `config.yml`):
+
+`python3 src/m8-sample-organizer.py -c /path/to/my-config.yml`
 
 That's it!  You'll see as it begins to copy and convert your sample library.
 

@@ -1,3 +1,4 @@
+import argparse
 import os
 import re
 import string
@@ -5,8 +6,11 @@ import subprocess
 import yaml
 import pathlib
 
+parser = argparse.ArgumentParser(description="Organize and convert samples for the M8 tracker.")
+parser.add_argument("-c", "--config", default="config.yml", help="path to config file (default: config.yml)")
+args = parser.parse_args()
 
-with open("config.yml", "r") as f:
+with open(args.config, "r") as f:
     config = yaml.safe_load(f)
 
 

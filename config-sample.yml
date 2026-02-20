@@ -66,6 +66,7 @@ PHRASE_REPLACEMENTS:
   "reverb": "rev"
   "delay": "dly"
   "filtered": "filt"
+  "reverse": "rev"
 
 # "Split punctuation" is used to separate words.
 SPLIT_PUNCTUATION:
@@ -74,6 +75,7 @@ SPLIT_PUNCTUATION:
 - "-"
 - "+"
 - "|"
+- "."
 
 # "Fill punctuation" is removed.
 FILL_PUNCTUATION:
