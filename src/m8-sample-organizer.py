@@ -1,14 +1,21 @@
 import argparse
+import logging
 import os
 import re
-import string
 import subprocess
+import sys
 import yaml
 import pathlib
 
 parser = argparse.ArgumentParser(description="Organize and convert samples for the M8 tracker.")
 parser.add_argument("-c", "--config", default="config.yml", help="path to config file (default: config.yml)")
 args = parser.parse_args()
+
+logging.basicConfig(
+    filename="error.log",
+    level=logging.ERROR,
+    format="%(asctime)s %(message)s",
+)
 
 with open(args.config, "r") as f:
     config = yaml.safe_load(f)
@@ -21,7 +28,7 @@ TARGET_BIT_DEPTH = config["TARGET_BIT_DEPTH"]
 FILE_TYPES = config["FILE_TYPES"]
 SPLIT_PUNCTUATION = config["SPLIT_PUNCTUATION"]
 FILL_PUNCTUATION = config["FILL_PUNCTUATION"]
-STRIKE_WORDS = [word.lower() for word in config["STRIKE_WORDS"]]
+STRIKE_WORDS = [word.lower() for word in (config["STRIKE_WORDS"] or [])]
 JOIN_SEP = config["JOIN_SEP"]
 WORD_FORMAT = config["WORD_FORMAT"]
 DUPES_ELIMINATE_PATH = config["DUPES_ELIMINATE_PATH"]
@@ -32,12 +39,9 @@ MAX_OUTPUT_LENGTH = config["MAX_OUTPUT_LENGTH"]
 
 # Load phrase replacements (case-insensitive)
 PHRASE_REPLACEMENTS = {}
-if "PHRASE_REPLACEMENTS" in config:
+if config.get("PHRASE_REPLACEMENTS"):
     for original, replacement in config["PHRASE_REPLACEMENTS"].items():
         PHRASE_REPLACEMENTS[original.lower()] = replacement
-
-# Global set to track used output paths for collision detection
-used_output_paths = set()
 
 def get_files_by_type(folder, file_types=None):
     # Initialize an empty list to store the file paths
@@ -89,17 +93,22 @@ def shorten_path(path):
     # Split the path into a list of parts (i.e., folders)
     parts = path.split(os.sep)
 
+    # Create a set to store the unique words
+    unique_words = set()
+
+    if len(parts) == 1:
+        # File directly in SRC_FOLDER with no subdirectory
+        file = file_to_wav(clean_file(parts[0], unique_words))
+        return file
+
     pack = parts[0]
     path = parts[1:-1]
     file = parts[-1]
 
-    # Create a set to store the unique words
-    unique_words = set()
-
     pack = clean_folder(pack, unique_words)
     path = clean_path(path, unique_words)
     file = file_to_wav(clean_file(file, unique_words))
-    
+
     # Join the parts back together
     parts = [pack, path, file]
     path = os.sep.join([part for part in parts if part])
@@ -138,9 +147,6 @@ def apply_phrase_replacements(text):
     return result
 
 def clean_folder(folder, unique_words):
-    # Apply phrase replacements first, before any other processing
-    folder = apply_phrase_replacements(folder)
-    
     words = folder.split()
 
     words = remove_strike_words(words)
@@ -164,15 +170,17 @@ def clean_path(path, unique_words):
 
     path = [folder for folder in path if re.sub(r"\s+", "", folder)]
 
-    return "/".join(path)
+    return os.sep.join(path)
 
 def clean_file(file, unique_words):
-    # Apply phrase replacements to the file name first
-    file = apply_phrase_replacements(file)
-    
     p = pathlib.Path(file)
 
-    words = [format_word(word) for word in p.stem.split()]
+    words = p.stem.split()
+    words = remove_strike_words(words)
+    words_deduped = remove_dupe_words(words, unique_words)
+    if words_deduped:
+        words = words_deduped
+    words = [format_word(word) for word in words]
 
     return JOIN_SEP.join(words) + p.suffix
 
@@ -212,7 +220,6 @@ def format_word(word):
 
 def extract_numeric_suffix(stem):
     """Extract existing numeric suffix from filename stem. Returns (base_stem, suffix_num) or (stem, None)."""
-    import re
     # Look for patterns like _01, _02, _1, _2 at the end of the filename
     match = re.search(r'_(\d+)$', stem)
     if match:
@@ -293,19 +300,20 @@ def generate_unique_path(original_path, used_paths):
                 # Keep the existing suffix
                 suffix = format_suffix(temp_existing_suffix)
                 existing_numbers.add(temp_existing_suffix)
+                suffix_num = temp_existing_suffix
             else:
                 # Assign a new suffix, finding the next available number
-                counter = 1
-                while counter in existing_numbers:
-                    counter += 1
-                suffix = format_suffix(counter)
-                existing_numbers.add(counter)
-            
+                suffix_num = 1
+                while suffix_num in existing_numbers:
+                    suffix_num += 1
+                suffix = format_suffix(suffix_num)
+                existing_numbers.add(suffix_num)
+
             # Calculate space for the new filename
             max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
-            
+
             if max_stem_length <= 0:
-                new_stem = f"{counter:02d}"
+                new_stem = f"{suffix_num:02d}"
             else:
                 truncated_base = temp_base_stem[:max_stem_length]
                 new_stem = truncated_base + suffix
@@ -360,53 +368,70 @@ def generate_unique_path(original_path, used_paths):
     used_paths.add(new_path)
     return new_path
 
-def convert_wav_to_16bit(ffmpeg_path, input_path, output_path):
+BIT_DEPTH_CODECS = {
+    16: 'pcm_s16le',
+    24: 'pcm_s24le',
+    32: 'pcm_s32le',
+}
+
+def convert_audio(ffmpeg_path, input_path, output_path):
     # Create the directories in the output path if they do not exist
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    codec = BIT_DEPTH_CODECS.get(TARGET_BIT_DEPTH, 'pcm_s16le')
 
     # Construct the FFmpeg command
-    command = [ffmpeg_path, '-hide_banner', '-loglevel', 'error', '-y', '-i', input_path, '-acodec', 'pcm_s16le', output_path]
+    command = [ffmpeg_path, '-hide_banner', '-loglevel', 'error', '-y', '-i', input_path, '-acodec', codec, output_path]
 
     try:
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as e:
-        print("error converting!")
+        print(f"Error converting {input_path}: {e}")
+        logging.error(f"Failed to convert {input_path} -> {output_path}: {e}")
 
 def main():
-    global used_output_paths
-    used_output_paths = set()  # Reset the set for each run
-    
+    if not os.path.isdir(SRC_FOLDER):
+        print(f"Error: SRC_FOLDER does not exist: {SRC_FOLDER}")
+        sys.exit(1)
+
     files = get_files_by_type(SRC_FOLDER, file_types=FILE_TYPES)
+
+    # First pass: compute all output paths before writing any files
+    used_output_paths = set()
+    file_plan = []
 
     for src_path in files:
         relative_path = strip_path_prefix(src_path, SRC_FOLDER)
         short_path = shorten_path(relative_path)
 
-        print(f"Input {relative_path}")
-        if len(short_path) < MAX_OUTPUT_LENGTH:
-            # Generate unique path to prevent collisions
-            unique_short_path = generate_unique_path(short_path, used_output_paths)
-            print(f"Output {unique_short_path}")
-            if unique_short_path != short_path:
-                print(f"  (collision resolved: {short_path} -> {unique_short_path})")
-        else:
+        if len(short_path) >= MAX_OUTPUT_LENGTH:
+            print(f"Output {short_path} is longer than {MAX_OUTPUT_LENGTH} characters. Edit?")
             while len(short_path) >= MAX_OUTPUT_LENGTH:
-                print(f"Output {short_path} is longer than {MAX_OUTPUT_LENGTH} characters. Edit?")
                 short_path = input(">")
-            # After manual editing, still check for uniqueness
-            unique_short_path = generate_unique_path(short_path, used_output_paths)
-            if unique_short_path != short_path:
-                print(f"  (collision resolved: {short_path} -> {unique_short_path})")
 
+        unique_short_path = generate_unique_path(short_path, used_output_paths)
+
+        print(f"Input  {relative_path}")
+        print(f"Output {unique_short_path}")
+        if unique_short_path != short_path:
+            print(f"  (collision resolved: {short_path} -> {unique_short_path})")
+
+        file_plan.append((src_path, unique_short_path))
+
+    # Second pass: convert and write files using the final resolved paths
+    converted = 0
+    for src_path, unique_short_path in file_plan:
         dest_path = os.path.join(DEST_FOLDER, unique_short_path)
 
         if SKIP_EXISTING and os.path.exists(dest_path):
             continue
 
-        print()
+        convert_audio(FFMPEG_PATH, src_path, dest_path)
+        converted += 1
 
-        convert_wav_to_16bit(FFMPEG_PATH, src_path, dest_path)
+    print(f"{len(files)} files found, {converted} converted")
 
-    print(f"{len(files)} files processed")
-
-main()
+if __name__ == "__main__":
+    main()

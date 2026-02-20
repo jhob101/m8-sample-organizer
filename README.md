@@ -95,3 +95,5 @@ You can also specify a different config file with the `-c` flag (defaults to `co
 That's it!  You'll see as it begins to copy and convert your sample library.
 
 As you add more samples to your library, you can rerun this tool - by default, any existing files will be ignored, so only new ones will be processed.
+
+If any files fail to convert, the errors will be logged to `error.log` in the project folder.
