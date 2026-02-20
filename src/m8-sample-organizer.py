@@ -6,6 +6,7 @@ import subprocess
 import sys
 import yaml
 import pathlib
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser(description="Organize and convert samples for the M8 tracker.")
 parser.add_argument("-c", "--config", default="config.yml", help="path to config file (default: config.yml)")
@@ -232,139 +233,70 @@ def format_suffix(num):
     """Format numeric suffix with zero padding for single digits."""
     return f"_{num:02d}"
 
-def generate_unique_path(original_path, used_paths):
-    """Generate a unique path by appending numeric suffixes to avoid collisions."""
-    # Check if this exact path is already used
-    if original_path not in used_paths:
-        # Check if there would be a collision after any potential truncation/processing
-        path_obj = pathlib.Path(original_path)
-        directory = str(path_obj.parent) if path_obj.parent != pathlib.Path('.') else ""
-        stem = path_obj.stem
-        ext = path_obj.suffix
-        
-        # Extract any existing numeric suffix
-        base_stem, existing_suffix = extract_numeric_suffix(stem)
-        
-        # Check if there's any path that would conflict with this base name
-        base_collision = False
-        for used_path in used_paths:
-            used_path_obj = pathlib.Path(used_path)
-            if (used_path_obj.parent == path_obj.parent and 
-                used_path_obj.suffix == ext):
-                used_base_stem, _ = extract_numeric_suffix(used_path_obj.stem)
-                if used_base_stem == base_stem:
-                    base_collision = True
-                    break
-        
-        if not base_collision:
-            used_paths.add(original_path)
-            return original_path
-    
-    # We have a collision, so we need to handle it properly
+def make_numbered_path(directory, base_stem, num, ext):
+    """Build a path with a numeric suffix, respecting MAX_FILE_LENGTH."""
+    suffix = format_suffix(num)
+    max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
+    if max_stem_length <= 0:
+        new_stem = f"{num:02d}"
+    else:
+        new_stem = base_stem[:max_stem_length] + suffix
+    filename = new_stem + ext
+    return os.path.join(directory, filename) if directory else filename
+
+def generate_unique_path(original_path, used_paths, collision_index):
+    """Generate a unique path by appending numeric suffixes to avoid collisions.
+
+    collision_index is a dict mapping (directory, base_stem, ext) to a dict of
+    {suffix_num: path} for O(1) lookups instead of scanning all used_paths.
+    """
     path_obj = pathlib.Path(original_path)
     directory = str(path_obj.parent) if path_obj.parent != pathlib.Path('.') else ""
-    stem = path_obj.stem
     ext = path_obj.suffix
-    
-    # Extract the base stem and any existing numeric suffix
-    base_stem, existing_suffix = extract_numeric_suffix(stem)
-    
-    # Find all existing paths with this base stem in the same directory
-    collision_group = []
-    existing_numbers = set()
-    
-    for used_path in list(used_paths):
-        used_path_obj = pathlib.Path(used_path)
-        if (used_path_obj.parent == path_obj.parent and 
-            used_path_obj.suffix == ext):
-            used_base_stem, used_suffix = extract_numeric_suffix(used_path_obj.stem)
-            
-            # Check if stems match (ignoring numeric suffixes)
-            if used_base_stem == base_stem:
-                collision_group.append(used_path)
-                if used_suffix is not None:
-                    existing_numbers.add(used_suffix)
-    
-    # If we found existing files in the collision group, we need to renumber them
-    if collision_group:
-        # Remove the collision group from used_paths temporarily
-        for path in collision_group:
-            used_paths.discard(path)
-        
-        # Re-add them with proper numbering, preserving existing numeric suffixes
-        for i, path in enumerate(collision_group):
-            path_obj_temp = pathlib.Path(path)
-            temp_base_stem, temp_existing_suffix = extract_numeric_suffix(path_obj_temp.stem)
-            
-            if temp_existing_suffix is not None:
-                # Keep the existing suffix
-                suffix = format_suffix(temp_existing_suffix)
-                existing_numbers.add(temp_existing_suffix)
-                suffix_num = temp_existing_suffix
-            else:
-                # Assign a new suffix, finding the next available number
-                suffix_num = 1
-                while suffix_num in existing_numbers:
-                    suffix_num += 1
-                suffix = format_suffix(suffix_num)
-                existing_numbers.add(suffix_num)
+    base_stem, existing_suffix = extract_numeric_suffix(path_obj.stem)
+    key = (directory, base_stem, ext)
 
-            # Calculate space for the new filename
-            max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
+    group = collision_index.get(key)
 
-            if max_stem_length <= 0:
-                new_stem = f"{suffix_num:02d}"
-            else:
-                truncated_base = temp_base_stem[:max_stem_length]
-                new_stem = truncated_base + suffix
-            
-            new_filename = new_stem + ext
-            new_path = os.path.join(directory, new_filename) if directory else new_filename
-            used_paths.add(new_path)
-    
-    # Now add the current file with the appropriate suffix
-    if existing_suffix is not None:
-        # Use the existing suffix if it's not already taken
-        if existing_suffix not in existing_numbers:
-            suffix = format_suffix(existing_suffix)
-            next_counter = existing_suffix
+    # No collision — first file with this base stem
+    if group is None:
+        collision_index[key] = {None: original_path}
+        used_paths.add(original_path)
+        return original_path
+
+    # Collision detected. If the first entry was unnumbered, renumber it.
+    if None in group:
+        first_path = group.pop(None)
+        used_paths.discard(first_path)
+        # Check if the first file had its own numeric suffix
+        first_stem = pathlib.Path(first_path).stem
+        _, first_suffix = extract_numeric_suffix(first_stem)
+        if first_suffix is not None:
+            num = first_suffix
         else:
-            # Find the next available number
-            next_counter = max(existing_numbers) + 1 if existing_numbers else 1
-            suffix = format_suffix(next_counter)
+            num = 1
+            while num in group:
+                num += 1
+        new_first = make_numbered_path(directory, base_stem, num, ext)
+        group[num] = new_first
+        used_paths.add(new_first)
+
+    # Find a number for the current file
+    if existing_suffix is not None and existing_suffix not in group:
+        num = existing_suffix
     else:
-        # Find the next available number
-        next_counter = max(existing_numbers) + 1 if existing_numbers else 1
-        suffix = format_suffix(next_counter)
-    
-    # Calculate space for the new filename
-    max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
-    
-    if max_stem_length <= 0:
-        new_stem = f"{next_counter:02d}"
-    else:
-        truncated_base = base_stem[:max_stem_length]
-        new_stem = truncated_base + suffix
-    
-    new_filename = new_stem + ext
-    new_path = os.path.join(directory, new_filename) if directory else new_filename
-    
-    # Final safety check
-    counter = next_counter
-    while new_path in used_paths and counter < 1000:
-        counter += 1
-        suffix = format_suffix(counter)
-        max_stem_length = MAX_FILE_LENGTH - len(ext) - len(suffix)
-        
-        if max_stem_length <= 0:
-            new_stem = f"{counter:02d}"
-        else:
-            truncated_base = base_stem[:max_stem_length]
-            new_stem = truncated_base + suffix
-        
-        new_filename = new_stem + ext
-        new_path = os.path.join(directory, new_filename) if directory else new_filename
-    
+        num = 1
+        while num in group:
+            num += 1
+
+    new_path = make_numbered_path(directory, base_stem, num, ext)
+
+    # Safety: ensure no exact-path collision (e.g. from truncation)
+    while new_path in used_paths and num < 1000:
+        num += 1
+        new_path = make_numbered_path(directory, base_stem, num, ext)
+
+    group[num] = new_path
     used_paths.add(new_path)
     return new_path
 
@@ -400,38 +332,42 @@ def main():
 
     # First pass: compute all output paths before writing any files
     used_output_paths = set()
+    collision_index = {}
     file_plan = []
 
-    for src_path in files:
+    for src_path in tqdm(files, desc="Scanning", unit="file"):
         relative_path = strip_path_prefix(src_path, SRC_FOLDER)
         short_path = shorten_path(relative_path)
 
         if len(short_path) >= MAX_OUTPUT_LENGTH:
-            print(f"Output {short_path} is longer than {MAX_OUTPUT_LENGTH} characters. Edit?")
+            tqdm.write(f"Output {short_path} is longer than {MAX_OUTPUT_LENGTH} characters. Edit?")
             while len(short_path) >= MAX_OUTPUT_LENGTH:
                 short_path = input(">")
 
-        unique_short_path = generate_unique_path(short_path, used_output_paths)
+        unique_short_path = generate_unique_path(short_path, used_output_paths, collision_index)
 
-        print(f"Input  {relative_path}")
-        print(f"Output {unique_short_path}")
         if unique_short_path != short_path:
-            print(f"  (collision resolved: {short_path} -> {unique_short_path})")
+            tqdm.write(f"  Collision: {short_path} -> {unique_short_path}")
 
         file_plan.append((src_path, unique_short_path))
 
     # Second pass: convert and write files using the final resolved paths
     converted = 0
-    for src_path, unique_short_path in file_plan:
-        dest_path = os.path.join(DEST_FOLDER, unique_short_path)
+    skipped = 0
+    with tqdm(file_plan, desc="Converting", unit="file") as pbar:
+        for src_path, unique_short_path in pbar:
+            dest_path = os.path.join(DEST_FOLDER, unique_short_path)
 
-        if SKIP_EXISTING and os.path.exists(dest_path):
-            continue
+            if SKIP_EXISTING and os.path.exists(dest_path):
+                skipped += 1
+                continue
 
-        convert_audio(FFMPEG_PATH, src_path, dest_path)
-        converted += 1
+            relative_src = strip_path_prefix(src_path, SRC_FOLDER)
+            pbar.set_postfix_str(f"{relative_src} -> {unique_short_path}", refresh=True)
+            convert_audio(FFMPEG_PATH, src_path, dest_path)
+            converted += 1
 
-    print(f"{len(files)} files found, {converted} converted")
+    print(f"{len(files)} files found, {converted} converted, {skipped} skipped")
 
 if __name__ == "__main__":
     main()
