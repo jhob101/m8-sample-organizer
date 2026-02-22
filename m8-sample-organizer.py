@@ -538,6 +538,12 @@ def main():
 
     print(f"{len(files)} files found, {converted} converted, {skipped} skipped")
 
+    # Report longest output path
+    if file_plan:
+        longest = max(file_plan, key=lambda x: len(M8_SAMPLE_PREFIX + x[1]))
+        longest_path = M8_SAMPLE_PREFIX + longest[1]
+        print(f"Longest path: [{len(longest_path)} chars] {longest_path}")
+
     # Report output paths that exceed MAX_OUTPUT_LENGTH (including M8_SAMPLE_PREFIX)
     long_paths = [
         out_path for _, out_path in file_plan
