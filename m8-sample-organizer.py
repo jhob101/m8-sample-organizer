@@ -384,6 +384,83 @@ def normalize_number_padding(file_plan, collision_index, used_output_paths):
     return new_file_plan, new_used_paths
 
 
+def collapse_single_child_dirs(file_plan):
+    """Collapse directories that contain only one subdirectory and no files.
+
+    For example, if all files under PAX/AFRICA_ROLAND/AM_AF_CROWD_AMB/ are in
+    a single subdirectory AM_AF_CROWD_AMB/, collapse the redundant level so
+    files end up directly in PAX/AFRICA_ROLAND/AM_AF_CROWD_AMB/.
+
+    Repeats until no more single-child directories remain.
+    """
+    changed = True
+    while changed:
+        changed = False
+        # Build a map of each directory to its immediate children (dirs and files)
+        dir_files = {}    # dir -> set of filenames
+        dir_subdirs = {}  # dir -> set of immediate child dir names
+
+        for _, out_path in file_plan:
+            parts = pathlib.PurePosixPath(out_path).parts
+            # Register the file in its parent directory
+            if len(parts) >= 2:
+                parent = str(pathlib.PurePosixPath(*parts[:-1]))
+                dir_files.setdefault(parent, set()).add(parts[-1])
+            else:
+                # File at root level, register under ""
+                dir_files.setdefault("", set()).add(parts[0])
+
+            # Register all ancestor -> child directory relationships
+            for depth in range(len(parts) - 1):
+                if depth == 0:
+                    ancestor = ""
+                else:
+                    ancestor = str(pathlib.PurePosixPath(*parts[:depth]))
+                child_dir = parts[depth]
+                dir_subdirs.setdefault(ancestor, set()).add(child_dir)
+
+        # Find directories that have exactly one subdirectory and no files
+        dirs_to_collapse = set()
+        all_dirs = set(dir_files.keys()) | set(dir_subdirs.keys())
+        for d in all_dirs:
+            subdirs = dir_subdirs.get(d, set())
+            files = dir_files.get(d, set())
+            if len(subdirs) == 1 and len(files) == 0:
+                # This dir has one child dir and no files — collapse it
+                child_name = next(iter(subdirs))
+                if d:
+                    dirs_to_collapse.add(d + "/" + child_name)
+                else:
+                    dirs_to_collapse.add(child_name)
+
+        if not dirs_to_collapse:
+            break
+
+        # For each collapsible dir, remove the child level from all paths
+        new_file_plan = []
+        for src_path, out_path in file_plan:
+            parts = pathlib.PurePosixPath(out_path).parts
+            new_parts = list(parts)
+            # Walk from deepest to shallowest to handle nested collapses
+            for depth in range(len(parts) - 2, -1, -1):
+                if depth == 0:
+                    dir_path = parts[0]
+                else:
+                    dir_path = str(pathlib.PurePosixPath(*parts[:depth + 1]))
+                if dir_path in dirs_to_collapse:
+                    # Remove the child directory level (depth) from the path
+                    # The parent keeps its name, the child is removed
+                    new_parts.pop(depth)
+                    changed = True
+
+            new_out = str(pathlib.PurePosixPath(*new_parts)) if new_parts else out_path
+            new_file_plan.append((src_path, new_out))
+
+        file_plan = new_file_plan
+
+    return file_plan
+
+
 BIT_DEPTH_CODECS = {
     16: 'pcm_s16le',
     24: 'pcm_s24le',
@@ -439,6 +516,9 @@ def main():
     file_plan, used_output_paths = normalize_number_padding(
         file_plan, collision_index, used_output_paths
     )
+
+    # Collapse directories that contain only one subdirectory and no files
+    file_plan = collapse_single_child_dirs(file_plan)
 
     # Second pass: convert and write files using the final resolved paths
     converted = 0
