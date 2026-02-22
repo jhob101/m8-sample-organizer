@@ -86,11 +86,11 @@ Then install the required Python libraries:
 
 With the virtual environment activated, run the following command:
 
-`python3 src/m8-sample-organizer.py`
+`python3 m8-sample-organizer.py`
 
 You can also specify a different config file with the `-c` flag (defaults to `config.yml`):
 
-`python3 src/m8-sample-organizer.py -c /path/to/my-config.yml`
+`python3 m8-sample-organizer.py -c /path/to/my-config.yml`
 
 That's it!  You'll see as it begins to copy and convert your sample library.
 

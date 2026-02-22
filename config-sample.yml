@@ -22,7 +22,10 @@ FFMPEG_PATH: "/usr/local/bin/ffmpeg"
 
 MAX_FILE_LENGTH: 38
 MAX_DIR_LENGTH: 37
-MAX_OUTPUT_LENGTH: 120
+MAX_OUTPUT_LENGTH: 128
+
+# Default sample directory on the M8, included in MAX_OUTPUT_LENGTH counting
+M8_SAMPLE_DIR: "Samples"
 
 ###
 ### PATH CLEANUP CONFIG
@@ -42,6 +45,59 @@ STRIKE_WORDS:
 - cpa
 - splice
 - export
+
+# "Keep words" are never removed by strike-word matching or deduplication.
+# Use this to protect musically important descriptors that might otherwise be
+# stripped (e.g. "pad" would be stripped by the "pack" strike word prefix).
+KEEP_WORDS:
+- pad
+- pads
+- atmos
+- kick
+- snare
+- hat
+- clap
+- tom
+- ride
+- crash
+- cymbal
+- perc
+- bass
+- lead
+- chord
+- stab
+- pluck
+- key
+- keys
+- vocal
+- vox
+- fx
+- sfx
+- hit
+- loop
+- fill
+- roll
+- rim
+- shaker
+- conga
+- bongo
+- bell
+- sub
+- noise
+- drone
+- riser
+- sweep
+- texture
+- layer
+- top
+- mid
+- low
+- wet
+- dry
+- mono
+- stereo
+- long
+- short
 
 # Phrase replacements to shorten common terms (case-insensitive matching)
 # Format: "original_phrase": "replacement"
